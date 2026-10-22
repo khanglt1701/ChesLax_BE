@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cheslax.Api/Cheslax.Api.csproj" />
+    <Project Path="src/Cheslax.Application/Cheslax.Application.csproj" />
+    <Project Path="src/Cheslax.Domain/Cheslax.Domain.csproj" />
+    <Project Path="src/Cheslax.GameEngine/Cheslax.GameEngine.csproj" />
+    <Project Path="src/Cheslax.Infrastructure/Cheslax.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cheslax.IntegrationTests/Cheslax.IntegrationTests.csproj" />
+    <Project Path="tests/Cheslax.UnitTests/Cheslax.UnitTests.csproj" />
+  </Folder>
+</Solution>
