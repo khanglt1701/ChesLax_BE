@@ -10,7 +10,37 @@ public sealed record UpdateProfileRequest(string DisplayName, string AvatarId);
 
 public sealed record UserDto(string Username, string DisplayName, string AvatarId, DateTimeOffset CreatedAt);
 
-public sealed record PublicProfileDto(string Username, string DisplayName, string AvatarId, DateTimeOffset CreatedAt);
+public sealed record GameRatingDto(
+    string GameId,
+    int Rating,
+    int Wins,
+    int Losses,
+    int Draws,
+    int GamesPlayed,
+    int HighestRating,
+    DateTimeOffset? UpdatedAt);
+
+public sealed record RatingHistoryDto(
+    Guid Id,
+    Guid MatchId,
+    string GameId,
+    DateTimeOffset At,
+    int OldRating,
+    int NewRating,
+    int Delta,
+    string OldRankId,
+    string NewRankId,
+    string Result,
+    string OpponentName,
+    int OpponentRating);
+
+public sealed record ProfileDto(
+    string Username,
+    string DisplayName,
+    string AvatarId,
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<GameRatingDto> Ratings,
+    IReadOnlyList<RatingHistoryDto> History);
 
 public sealed class RegisterRequestValidator : AbstractValidator<RegisterRequest>
 {

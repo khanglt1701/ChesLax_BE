@@ -1,5 +1,7 @@
 using Cheslax.Application.Abstractions;
 using Cheslax.Application.Auth;
+using Cheslax.Application.Catalog;
+using Cheslax.Infrastructure.Catalog;
 using Cheslax.Infrastructure.Identity;
 using Cheslax.Infrastructure.Options;
 using Cheslax.Infrastructure.Persistence;
@@ -26,6 +28,8 @@ public static class DependencyInjection
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton(database);
         services.AddScoped<IAuthService, IdentityAuthService>();
+        services.AddScoped<ILeaderboardService, LeaderboardService>();
+        services.AddScoped<IPreferenceService, PreferenceService>();
 
         services.AddDbContext<CheslaxDbContext>(options =>
         {
@@ -56,7 +60,7 @@ public static class DependencyInjection
         });
 
         services
-            .AddIdentity<ApplicationUser, IdentityRole>(options =>
+            .AddIdentity<User, Role>(options =>
             {
                 options.User.RequireUniqueEmail = true;
                 options.Password.RequiredLength = 8;
@@ -80,6 +84,13 @@ public static class DependencyInjection
     {
         await using var scope = host.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CheslaxDbContext>();
-        await db.Database.EnsureCreatedAsync(cancellationToken);
+        var database = scope.ServiceProvider.GetRequiredService<DatabaseOptions>();
+        if (database.IsSqlite)
+        {
+            await db.Database.EnsureCreatedAsync(cancellationToken);
+            return;
+        }
+
+        await db.Database.MigrateAsync(cancellationToken);
     }
 }

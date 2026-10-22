@@ -1,4 +1,5 @@
 using Cheslax.Application.Auth;
+using Cheslax.Application.Catalog;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -38,11 +39,14 @@ public sealed class AuthController(IAuthService auth, IValidator<RegisterRequest
 
 [ApiController]
 [Route("api/users")]
-public sealed class UsersController(IAuthService auth) : ControllerBase
+public sealed class UsersController(
+    IAuthService auth,
+    IPreferenceService preferences,
+    IValidator<UpdatePreferenceRequest> preferenceValidator) : ControllerBase
 {
     [Authorize]
     [HttpGet("me")]
-    public async Task<ActionResult<UserDto>> Me(CancellationToken cancellationToken)
+    public async Task<ActionResult<ProfileDto>> Me(CancellationToken cancellationToken)
     {
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userId))
@@ -55,7 +59,7 @@ public sealed class UsersController(IAuthService auth) : ControllerBase
 
     [Authorize]
     [HttpPut("me")]
-    public async Task<ActionResult<UserDto>> Update([FromBody] UpdateProfileRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<ProfileDto>> Update([FromBody] UpdateProfileRequest request, CancellationToken cancellationToken)
     {
         var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userId))
@@ -66,8 +70,37 @@ public sealed class UsersController(IAuthService auth) : ControllerBase
         return Ok(await auth.UpdateCurrentAsync(userId, request, cancellationToken));
     }
 
+    [Authorize]
+    [HttpGet("me/preferences")]
+    public async Task<ActionResult<UserPreferenceDto>> Preferences(CancellationToken cancellationToken)
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        return Ok(await preferences.GetAsync(userId, cancellationToken));
+    }
+
+    [Authorize]
+    [HttpPut("me/preferences")]
+    public async Task<ActionResult<UserPreferenceDto>> UpdatePreferences(
+        [FromBody] UpdatePreferenceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        await preferenceValidator.ValidateAndThrowAsync(request, cancellationToken);
+        return Ok(await preferences.UpdateAsync(userId, request, cancellationToken));
+    }
+
     [HttpGet("{username}")]
-    public async Task<ActionResult<PublicProfileDto>> PublicProfile(string username, CancellationToken cancellationToken)
+    public async Task<ActionResult<ProfileDto>> PublicProfile(string username, CancellationToken cancellationToken)
     {
         var profile = await auth.GetPublicAsync(username, cancellationToken);
         return profile is null ? NotFound() : Ok(profile);

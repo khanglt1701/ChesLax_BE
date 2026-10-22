@@ -1,13 +1,17 @@
 using Cheslax.Application.Abstractions;
 using Cheslax.Application.Auth;
 using Cheslax.Application.Common;
+using Cheslax.Domain;
+using Cheslax.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace Cheslax.Infrastructure.Identity;
 
 public sealed class IdentityAuthService(
-    UserManager<ApplicationUser> users,
-    SignInManager<ApplicationUser> signIn,
+    UserManager<User> users,
+    SignInManager<User> signIn,
+    CheslaxDbContext db,
     IClock clock) : IAuthService
 {
     private static readonly string[] AllowedAvatars =
@@ -28,13 +32,14 @@ public sealed class IdentityAuthService(
             throw new CheslaxException("EMAIL_TAKEN", "Không tạo được tài khoản.", 409);
         }
 
-        var user = new ApplicationUser
+        var now = clock.UtcNow;
+        var user = new User
         {
             UserName = username,
             Email = request.Email.Trim(),
             DisplayName = request.DisplayName.Trim(),
             AvatarId = "seal-1",
-            CreatedAt = clock.UtcNow,
+            CreatedAt = now,
             EmailConfirmed = true,
         };
 
@@ -44,8 +49,13 @@ public sealed class IdentityAuthService(
             throw new CheslaxException("REGISTER_FAILED", "Không tạo được tài khoản.", 400);
         }
 
+        db.UserPreferences.Add(UserPreference.CreateDefault(user.Id, now));
+        db.PlayerRatings.Add(PlayerRating.CreateInitial(user.Id, GameType.Chess, now));
+        db.PlayerRatings.Add(PlayerRating.CreateInitial(user.Id, GameType.OAnQuan, now));
+        await db.SaveChangesAsync(cancellationToken);
+
         await signIn.SignInAsync(user, isPersistent: true);
-        return ToDto(user);
+        return ToUserDto(user);
     }
 
     public async Task<UserDto> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -62,7 +72,9 @@ public sealed class IdentityAuthService(
             throw new CheslaxException("INVALID_CREDENTIALS", "Tên đăng nhập hoặc mật khẩu không đúng.", 401);
         }
 
-        return ToDto(user);
+        user.LastSeenAt = clock.UtcNow;
+        await users.UpdateAsync(user);
+        return ToUserDto(user);
     }
 
     public async Task LogoutAsync(CancellationToken cancellationToken)
@@ -70,14 +82,14 @@ public sealed class IdentityAuthService(
         await signIn.SignOutAsync();
     }
 
-    public async Task<UserDto> GetCurrentAsync(string userId, CancellationToken cancellationToken)
+    public async Task<ProfileDto> GetCurrentAsync(string userId, CancellationToken cancellationToken)
     {
         var user = await users.FindByIdAsync(userId)
             ?? throw new CheslaxException("NOT_FOUND", "Không tìm thấy tài khoản.", 404);
-        return ToDto(user);
+        return await ToProfileAsync(user, cancellationToken);
     }
 
-    public async Task<UserDto> UpdateCurrentAsync(string userId, UpdateProfileRequest request, CancellationToken cancellationToken)
+    public async Task<ProfileDto> UpdateCurrentAsync(string userId, UpdateProfileRequest request, CancellationToken cancellationToken)
     {
         var user = await users.FindByIdAsync(userId)
             ?? throw new CheslaxException("NOT_FOUND", "Không tìm thấy tài khoản.", 404);
@@ -93,17 +105,69 @@ public sealed class IdentityAuthService(
             throw new CheslaxException("UPDATE_FAILED", "Không lưu được hồ sơ.", 400);
         }
 
-        return ToDto(user);
+        return await ToProfileAsync(user, cancellationToken);
     }
 
-    public async Task<PublicProfileDto?> GetPublicAsync(string username, CancellationToken cancellationToken)
+    public async Task<ProfileDto?> GetPublicAsync(string username, CancellationToken cancellationToken)
     {
         var user = await users.FindByNameAsync(username.Trim());
-        return user is null
-            ? null
-            : new PublicProfileDto(user.UserName!, user.DisplayName, user.AvatarId, user.CreatedAt);
+        return user is null ? null : await ToProfileAsync(user, cancellationToken);
     }
 
-    private static UserDto ToDto(ApplicationUser user) =>
+    private static UserDto ToUserDto(User user) =>
         new(user.UserName!, user.DisplayName, user.AvatarId, user.CreatedAt);
+
+    private async Task<ProfileDto> ToProfileAsync(User user, CancellationToken cancellationToken)
+    {
+        var ratings = await db.PlayerRatings.AsNoTracking()
+            .Where(rating => rating.UserId == user.Id)
+            .OrderBy(rating => rating.GameType)
+            .ToListAsync(cancellationToken);
+        var history = (await db.RatingHistories.AsNoTracking()
+            .Where(entry => entry.UserId == user.Id)
+            .ToListAsync(cancellationToken))
+            .OrderByDescending(entry => entry.CreatedAt)
+            .Take(50)
+            .ToList();
+
+        return new ProfileDto(
+            user.UserName!,
+            user.DisplayName,
+            user.AvatarId,
+            user.CreatedAt,
+            ratings.Select(ToRatingDto).ToList(),
+            history.Select(ToHistoryDto).ToList());
+    }
+
+    private static GameRatingDto ToRatingDto(PlayerRating rating) => new(
+        rating.GameType.ToId(),
+        rating.Rating,
+        rating.Wins,
+        rating.Losses,
+        rating.Draws,
+        rating.GamesPlayed,
+        rating.PeakRating,
+        rating.UpdatedAt);
+
+    private static RatingHistoryDto ToHistoryDto(RatingHistory entry) => new(
+        entry.Id,
+        entry.MatchId,
+        entry.GameType.ToId(),
+        entry.CreatedAt,
+        entry.OldRating,
+        entry.NewRating,
+        entry.Delta,
+        entry.OldRankId,
+        entry.NewRankId,
+        ResultId(entry.Result),
+        entry.OpponentName,
+        entry.OpponentRating);
+
+    private static string ResultId(MatchResultKind result) => result switch
+    {
+        MatchResultKind.Win => "win",
+        MatchResultKind.Loss => "loss",
+        MatchResultKind.Draw => "draw",
+        _ => "draw",
+    };
 }

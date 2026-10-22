@@ -5,6 +5,7 @@ using Cheslax.Api.Options;
 using Cheslax.Application;
 using Cheslax.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -133,7 +134,10 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
 
-await app.InitializeDatabaseAsync();
+if (!EF.IsDesignTime)
+{
+    await app.InitializeDatabaseAsync();
+}
 
 app.Run();
 

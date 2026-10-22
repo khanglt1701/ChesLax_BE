@@ -32,10 +32,14 @@ public class AuthEndpointTests : IClassFixture<CheslaxApiFactory>
 
         var me = await _client.GetAsync("/api/users/me");
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
-        var body = await me.Content.ReadFromJsonAsync<UserDto>();
+        var body = await me.Content.ReadFromJsonAsync<ProfileDto>();
         Assert.NotNull(body);
         Assert.Equal($"user_{suffix}", body.Username);
         Assert.Equal("Kỳ thủ Test", body.DisplayName);
+        Assert.Equal(2, body.Ratings.Count);
+        Assert.Contains(body.Ratings, rating => rating.GameId == "chess" && rating.Rating == 1000);
+        Assert.Contains(body.Ratings, rating => rating.GameId == "o-an-quan" && rating.Rating == 1000);
+        Assert.Empty(body.History);
         Assert.DoesNotContain("example.com", await me.Content.ReadAsStringAsync());
 
         await _client.PostAsync("/api/auth/logout", null);
@@ -77,5 +81,15 @@ public class AuthEndpointTests : IClassFixture<CheslaxApiFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, login.StatusCode);
     }
 
-    private sealed record UserDto(string Username, string DisplayName, string AvatarId, DateTimeOffset CreatedAt);
+    private sealed record ProfileDto(
+        string Username,
+        string DisplayName,
+        string AvatarId,
+        DateTimeOffset CreatedAt,
+        List<GameRatingDto> Ratings,
+        List<RatingHistoryDto> History);
+
+    private sealed record GameRatingDto(string GameId, int Rating, int HighestRating);
+
+    private sealed record RatingHistoryDto(Guid Id, string GameId, string Result);
 }
