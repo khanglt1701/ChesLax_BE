@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+artifacts/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+logs/
+*.log

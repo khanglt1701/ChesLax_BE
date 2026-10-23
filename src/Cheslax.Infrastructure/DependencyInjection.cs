@@ -21,10 +21,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        var database = new DatabaseOptions
-        {
-            Provider = configuration["Database:Provider"] ?? "SqlServer",
-        };
+        var database = BindDatabaseOptions(configuration);
         var connectionString = configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
 
@@ -43,30 +40,27 @@ public static class DependencyInjection
 
         services.AddDbContext<CheslaxDbContext>(options =>
         {
-            if (database.IsNpgsql)
-            {
-                options.UseNpgsql(connectionString, npgsql =>
-                {
-                    npgsql.MigrationsAssembly(typeof(CheslaxDbContext).Assembly.FullName);
-                    npgsql.CommandTimeout(30);
-                });
-            }
-            else if (database.IsSqlite)
+            if (database.IsSqlite)
             {
                 options.UseSqlite(connectionString, sqlite =>
                 {
                     sqlite.MigrationsAssembly(typeof(CheslaxDbContext).Assembly.FullName);
                     sqlite.CommandTimeout(30);
                 });
+                return;
             }
-            else
+
+            if (database.IsSqlServer)
             {
-                options.UseSqlServer(connectionString, sql =>
-                {
-                    sql.MigrationsAssembly(typeof(CheslaxDbContext).Assembly.FullName);
-                    sql.CommandTimeout(30);
-                });
+                throw new InvalidOperationException(
+                    "SQL Server is no longer supported. Set Database:Provider to Npgsql (PostgreSQL) or Sqlite (tests).");
             }
+
+            options.UseNpgsql(connectionString, npgsql =>
+            {
+                npgsql.MigrationsAssembly(typeof(CheslaxDbContext).Assembly.FullName);
+                npgsql.CommandTimeout(30);
+            });
         });
 
         services
@@ -90,22 +84,41 @@ public static class DependencyInjection
         return services;
     }
 
-    public static async Task InitializeDatabaseAsync(this IHost host, CancellationToken cancellationToken = default)
+    public static async Task InitializeDatabaseAsync(
+        this IHost host,
+        bool applyMigrations,
+        bool migrateOnly = false,
+        CancellationToken cancellationToken = default)
     {
         await using var scope = host.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CheslaxDbContext>();
         var database = scope.ServiceProvider.GetRequiredService<DatabaseOptions>();
-        var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+
         if (database.IsSqlite)
         {
             await db.Database.EnsureCreatedAsync(cancellationToken);
         }
-        else if (environment.IsDevelopment())
+        else if (applyMigrations || migrateOnly)
         {
             await db.Database.MigrateAsync(cancellationToken);
         }
 
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-        await SystemBotUser.EnsureAsync(users, cancellationToken);
+        if (await db.Database.CanConnectAsync(cancellationToken))
+        {
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+            await SystemBotUser.EnsureAsync(users, cancellationToken);
+        }
+    }
+
+    public static DatabaseOptions BindDatabaseOptions(IConfiguration configuration)
+    {
+        var database = configuration.GetSection(DatabaseOptions.SectionName).Get<DatabaseOptions>()
+            ?? new DatabaseOptions();
+        if (string.IsNullOrWhiteSpace(database.Provider))
+        {
+            database.Provider = "Npgsql";
+        }
+
+        return database;
     }
 }

@@ -7,10 +7,15 @@ public sealed class CheslaxDbContextFactory : IDesignTimeDbContextFactory<Chesla
 {
     public CheslaxDbContext CreateDbContext(string[] args)
     {
+        var connectionString =
+            Environment.GetEnvironmentVariable("ConnectionStrings__Default")
+            ?? Environment.GetEnvironmentVariable("CONNECTIONSTRINGS_DEFAULT")
+            ?? "Host=127.0.0.1;Port=5432;Database=cheslax;Username=cheslax;Password=cheslax";
+
         var options = new DbContextOptionsBuilder<CheslaxDbContext>();
-        options.UseSqlServer(
-            @"Server=.\SQLEXPRESS;Database=Cheslax;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True",
-            sql => sql.MigrationsAssembly(typeof(CheslaxDbContext).Assembly.FullName));
+        options.UseNpgsql(
+            connectionString,
+            npgsql => npgsql.MigrationsAssembly(typeof(CheslaxDbContext).Assembly.FullName));
         return new CheslaxDbContext(options.Options);
     }
 }

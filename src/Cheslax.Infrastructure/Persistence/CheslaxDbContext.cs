@@ -3,6 +3,7 @@ using Cheslax.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace Cheslax.Infrastructure.Persistence;
 
@@ -31,6 +32,12 @@ public class CheslaxDbContext(DbContextOptions<CheslaxDbContext> options)
             room.Metadata.RemoveForeignKey(foreignKey);
         }
 
+        if (UsesNpgsql())
+        {
+            ConfigurePostgresConcurrency(modelBuilder);
+            return;
+        }
+
         if (!UsesSqlite())
         {
             return;
@@ -49,6 +56,33 @@ public class CheslaxDbContext(DbContextOptions<CheslaxDbContext> options)
             property.SetDefaultValue(new byte[] { 0, 0, 0, 0, 0, 0, 0, 1 });
         }
     }
+
+    private static void ConfigurePostgresConcurrency(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GameRoom>(entity =>
+        {
+            entity.Ignore(room => room.RowVersion);
+            MapXmin(entity);
+        });
+        modelBuilder.Entity<GameMatch>(entity =>
+        {
+            entity.Ignore(match => match.RowVersion);
+            MapXmin(entity);
+        });
+        MapXmin(modelBuilder.Entity<PlayerRating>());
+    }
+
+    private static void MapXmin<TEntity>(EntityTypeBuilder<TEntity> entity)
+        where TEntity : class
+    {
+        entity.Property<uint>("xmin")
+            .IsRowVersion();
+    }
+
+    private bool UsesNpgsql() =>
+        (Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) ?? false)
+        || options.Extensions.Any(extension =>
+            extension.GetType().Name.Contains("Npgsql", StringComparison.OrdinalIgnoreCase));
 
     private bool UsesSqlite() =>
         (Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) ?? false)

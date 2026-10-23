@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using Cheslax.Application.Abstractions;
 using Cheslax.Application.Common;
@@ -23,6 +24,7 @@ public sealed class PlayService(
     IOptions<MatchmakingOptions> options) : IPlayService
 {
     private static readonly char[] RoomAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".ToCharArray();
+    private static readonly SemaphoreSlim CompletionGate = new(1, 1);
     private readonly MatchmakingOptions _options = options.Value;
 
     public async Task<RoomPublicDto> CreateCasualRoomAsync(string userId, CreateCasualRoomRequest request, CancellationToken cancellationToken)
@@ -207,14 +209,13 @@ public sealed class PlayService(
         if (applied.Position.IsGameOver)
         {
             FinishFromChess(room, match, applied.Position);
-            await FinalizeRatings(room, match, cancellationToken);
         }
         else
         {
             await ApplyAiTurnIfNeeded(room, match, cancellationToken);
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        await CommitMatchAsync(room, match, cancellationToken);
         await notifier.RoomUpdatedAsync(room.Code, SeatIds(room), cancellationToken);
         return await ToPublic(room.Code, userId, cancellationToken);
     }
@@ -264,7 +265,6 @@ public sealed class PlayService(
             if (applied.State.Status == "ended")
             {
                 FinishFromOAnQuan(room, match, applied.State);
-                await FinalizeRatings(room, match, cancellationToken);
             }
             else
             {
@@ -276,7 +276,7 @@ public sealed class PlayService(
             throw new CheslaxException("ILLEGAL_MOVE", ex.Message, 400);
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        await CommitMatchAsync(room, match, cancellationToken);
         await notifier.RoomUpdatedAsync(room.Code, SeatIds(room), cancellationToken);
         return await ToPublic(room.Code, userId, cancellationToken);
     }
@@ -307,7 +307,7 @@ public sealed class PlayService(
             var changed = SyncClocks(room, match);
             if (match.Status == MatchStatus.Finished)
             {
-                await FinalizeRatings(room, match, cancellationToken);
+                await CommitMatchAsync(room, match, cancellationToken);
                 changed = true;
             }
             else if (room.DisconnectDeadline is not null && now >= room.DisconnectDeadline)
@@ -332,10 +332,13 @@ public sealed class PlayService(
                     changed = true;
                 }
             }
+            else if (changed)
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
 
             if (changed)
             {
-                await db.SaveChangesAsync(cancellationToken);
                 await notifier.RoomUpdatedAsync(room.Code, SeatIds(room), cancellationToken);
             }
         }
@@ -415,7 +418,7 @@ public sealed class PlayService(
             configure.AiRatingPolicy = plan.RatingPolicy;
         });
         await ApplyAiTurnIfNeeded(room, match, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+        await CommitMatchAsync(room, match, cancellationToken);
         return await ToPublic(room.Code, player.Id, cancellationToken);
     }
 
@@ -528,8 +531,42 @@ public sealed class PlayService(
         CancellationToken cancellationToken)
     {
         CompleteInMemory(room, match, outcome, reason, label, rate);
-        await FinalizeRatings(room, match, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+        await CommitMatchAsync(room, match, cancellationToken);
+    }
+
+    private async Task CommitMatchAsync(GameRoom room, GameMatch match, CancellationToken cancellationToken)
+    {
+        var protectRatings = match.Status is MatchStatus.Finished or MatchStatus.Abandoned && match.Rated;
+        if (protectRatings)
+        {
+            await CompletionGate.WaitAsync(cancellationToken);
+        }
+
+        try
+        {
+            if (protectRatings)
+            {
+                await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                await FinalizeRatings(room, match, cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+                return;
+            }
+
+            if (match.Status is MatchStatus.Finished or MatchStatus.Abandoned)
+            {
+                await FinalizeRatings(room, match, cancellationToken);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            if (protectRatings)
+            {
+                CompletionGate.Release();
+            }
+        }
     }
 
     private async Task FinalizeRatings(GameRoom room, GameMatch match, CancellationToken cancellationToken)
@@ -589,10 +626,6 @@ public sealed class PlayService(
         }
 
         ApplyOAnQuanAiMove(room, match, botSeat, plan, cancellationToken);
-        if (match.Status is MatchStatus.Finished or MatchStatus.Abandoned)
-        {
-            await FinalizeRatings(room, match, cancellationToken);
-        }
     }
 
     private RankedAiPlan PlanForMatch(GameMatch match)

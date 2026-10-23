@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+var migrateAndExit = args.Any(arg => string.Equals(arg, "--migrate", StringComparison.OrdinalIgnoreCase));
 
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
@@ -46,7 +47,9 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.Name = "cheslax.auth";
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.Cookie.SecurePolicy = builder.Environment.IsProduction()
+        ? CookieSecurePolicy.Always
+        : CookieSecurePolicy.SameAsRequest;
     options.SlidingExpiration = true;
     options.ExpireTimeSpan = TimeSpan.FromDays(14);
     options.Events.OnRedirectToLogin = context =>
@@ -61,12 +64,21 @@ builder.Services.ConfigureApplicationCookie(options =>
     };
 });
 
-var cors = builder.Configuration.GetSection(CorsOptions.SectionName).Get<CorsOptions>() ?? new CorsOptions();
+var corsOrigins = CorsOptions.ParseOrigins(
+    builder.Configuration,
+    builder.Environment.IsProduction()
+        ? []
+        : ["http://localhost:5173", "http://127.0.0.1:5173"]);
+if (builder.Environment.IsProduction() && corsOrigins.Length == 0)
+{
+    throw new InvalidOperationException("Cors:Origins must list the public HTTPS origin in production.");
+}
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("cheslax", policy =>
     {
-        policy.WithOrigins(cors.Origins)
+        policy.WithOrigins(corsOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -121,12 +133,6 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 app.UseCheslaxExceptionHandler();
 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHsts();
-    app.UseHttpsRedirection();
-}
-
 app.UseSwagger();
 app.UseSwaggerUI(options =>
 {
@@ -145,7 +151,13 @@ app.MapHealthChecks("/health");
 
 if (!EF.IsDesignTime)
 {
-    await app.InitializeDatabaseAsync();
+    var applyMigrations = migrateAndExit
+        || app.Configuration.GetValue("Database:ApplyMigrations", app.Environment.IsDevelopment());
+    await app.InitializeDatabaseAsync(applyMigrations, migrateAndExit);
+    if (migrateAndExit)
+    {
+        return;
+    }
 }
 
 app.Run();

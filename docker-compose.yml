@@ -1,0 +1,63 @@
+# Production-oriented stack: PostgreSQL (internal) + Cheslax API.
+# Frontend is deployed separately (static Nginx). See frontend/README.md.
+#
+# Postgres port 5432 is not published. Back up with pg_dump, not the volume.
+
+name: cheslax
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cheslax}
+      POSTGRES_USER: ${POSTGRES_USER:-cheslax}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - cheslax_pg:/var/lib/postgresql/data
+    command: postgres -c shared_buffers=128MB -c max_connections=50 -c idle_in_transaction_session_timeout=30000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cheslax} -d ${POSTGRES_DB:-cheslax}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    cpus: 0.50
+    networks:
+      - cheslax_internal
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cheslax-api:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      Database__Provider: Npgsql
+      Database__ApplyMigrations: ${Database__ApplyMigrations:-false}
+      ConnectionStrings__Default: ${ConnectionStrings__Default:?set ConnectionStrings__Default in .env}
+      Cors__Origins: ${Cors__Origins:-}
+    ports:
+      - "127.0.0.1:5080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    mem_limit: 768m
+    cpus: 1.00
+    networks:
+      - cheslax_internal
+
+networks:
+  cheslax_internal:
+    driver: bridge
+
+volumes:
+  cheslax_pg:

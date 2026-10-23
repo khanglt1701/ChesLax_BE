@@ -21,7 +21,6 @@ public sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
         builder.Property(room => room.Status).HasConversion<int>();
         builder.Property(room => room.Rated).HasDefaultValue(false);
         builder.Property(room => room.StateJson);
-        builder.Property(room => room.RowVersion).IsRowVersion();
         builder.HasIndex(room => room.Code).IsUnique();
         builder.HasIndex(room => new { room.Status, room.LastActivityAt });
         builder.HasIndex(room => room.CurrentMatchId);

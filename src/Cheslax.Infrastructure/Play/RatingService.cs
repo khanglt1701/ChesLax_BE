@@ -45,11 +45,8 @@ public sealed class RatingService(
                     : p1Result == MatchResultKind.Loss
                         ? MatchResultKind.Win
                         : MatchResultKind.Draw;
-            var humanBefore = humanIsP1 ? match.Player1RatingBefore : match.Player2RatingBefore;
             var aiRating = humanIsP1 ? match.Player2RatingBefore : match.Player1RatingBefore;
-            var change = EloCalculator.Compute(humanBefore, aiRating, humanResult, _options.KFactor);
-            var opponentName = AiOpponentPersona.Resolve(match.AiDifficulty).Name;
-            await ApplyOne(match, humanId, SystemBotUser.UserId, opponentName, change, humanResult, cancellationToken);
+            var change = await ApplyOne(match, humanId, SystemBotUser.UserId, AiOpponentPersona.Resolve(match.AiDifficulty).Name, aiRating, humanResult, cancellationToken);
             if (humanIsP1)
             {
                 match.Player1RatingAfter = change.NewRating;
@@ -64,39 +61,41 @@ public sealed class RatingService(
             return;
         }
 
-        var (change1, change2) = EloCalculator.ComputePair(
-            match.Player1RatingBefore,
-            match.Player2RatingBefore,
-            p1Result,
-            _options.KFactor);
         var users = await db.Users.AsNoTracking()
             .Where(user => user.Id == match.Player1UserId || user.Id == match.Player2UserId)
             .ToDictionaryAsync(user => user.Id, cancellationToken);
-        await ApplyOne(match, match.Player1UserId, match.Player2UserId, users.GetValueOrDefault(match.Player2UserId)?.DisplayName ?? "Đối thủ", change1, p1Result, cancellationToken);
-        await ApplyOne(
+        var change1 = await ApplyOne(
+            match,
+            match.Player1UserId,
+            match.Player2UserId,
+            users.GetValueOrDefault(match.Player2UserId)?.DisplayName ?? "Đối thủ",
+            match.Player2RatingBefore,
+            p1Result,
+            cancellationToken);
+        var change2 = await ApplyOne(
             match,
             match.Player2UserId,
             match.Player1UserId,
             users.GetValueOrDefault(match.Player1UserId)?.DisplayName ?? "Đối thủ",
-            change2,
+            match.Player1RatingBefore,
             p1Result == MatchResultKind.Win ? MatchResultKind.Loss : p1Result == MatchResultKind.Loss ? MatchResultKind.Win : MatchResultKind.Draw,
             cancellationToken);
         match.Player1RatingAfter = change1.NewRating;
         match.Player2RatingAfter = change2.NewRating;
     }
 
-    private async Task ApplyOne(
+    private async Task<EloChange> ApplyOne(
         GameMatch match,
         string userId,
         string opponentId,
         string opponentName,
-        EloChange change,
+        int opponentRating,
         MatchResultKind result,
         CancellationToken cancellationToken)
     {
         if (SystemBotUser.IsBotId(userId))
         {
-            return;
+            return new EloChange(0, 0, 0, 0);
         }
 
         var rating = await db.PlayerRatings.FirstOrDefaultAsync(
@@ -108,6 +107,7 @@ public sealed class RatingService(
             db.PlayerRatings.Add(rating);
         }
 
+        var change = EloCalculator.Compute(rating.Rating, opponentRating, result, _options.KFactor);
         rating.Rating = change.NewRating;
         rating.PeakRating = Math.Max(rating.PeakRating, change.NewRating);
         rating.GamesPlayed += 1;
@@ -131,8 +131,9 @@ public sealed class RatingService(
             NewRankId = newRank.Id,
             OpponentUserId = opponentId,
             OpponentName = opponentName,
-            OpponentRating = userId == match.Player1UserId ? match.Player2RatingBefore : match.Player1RatingBefore,
+            OpponentRating = opponentRating,
             CreatedAt = clock.UtcNow,
         });
+        return change;
     }
 }

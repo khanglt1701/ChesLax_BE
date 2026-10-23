@@ -29,7 +29,6 @@ public sealed class GameMatchConfiguration : IEntityTypeConfiguration<GameMatch>
         builder.HasIndex(match => new { match.OpponentType, match.Mode, match.Status });
         builder.Property(match => match.Outcome).HasConversion<int>();
         builder.Property(match => match.ResultReason).HasConversion<int>();
-        builder.Property(match => match.RowVersion).IsRowVersion();
         builder.HasIndex(match => match.Player1UserId);
         builder.HasIndex(match => match.Player2UserId);
         builder.HasIndex(match => new { match.GameType, match.FinishedAt });
