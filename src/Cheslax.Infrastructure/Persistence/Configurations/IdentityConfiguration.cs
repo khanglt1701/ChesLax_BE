@@ -11,6 +11,8 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.ToTable("Users");
         builder.Property(user => user.DisplayName).HasMaxLength(40).IsRequired();
         builder.Property(user => user.AvatarId).HasMaxLength(32).IsRequired();
+        builder.Property(user => user.IsGuest).HasDefaultValue(false);
+        builder.HasIndex(user => user.IsGuest);
     }
 }
 

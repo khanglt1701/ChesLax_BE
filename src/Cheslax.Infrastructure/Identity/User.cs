@@ -8,4 +8,5 @@ public sealed class User : IdentityUser
     public string AvatarId { get; set; } = "seal-1";
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? LastSeenAt { get; set; }
+    public bool IsGuest { get; set; }
 }

@@ -1,11 +1,24 @@
 namespace Cheslax.Domain;
 
+public enum MatchMode
+{
+    Casual = 1,
+    Ranked = 2,
+}
+
 public enum MatchStatus
 {
     Waiting = 1,
     Playing = 2,
     Finished = 3,
     Abandoned = 4,
+}
+
+public enum MatchmakingTicketStatus
+{
+    Queued = 1,
+    Matched = 2,
+    Cancelled = 3,
 }
 
 public enum MatchOutcome

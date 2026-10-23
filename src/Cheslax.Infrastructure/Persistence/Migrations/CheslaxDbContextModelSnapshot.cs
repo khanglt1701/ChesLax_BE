@@ -22,6 +22,34 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Cheslax.Domain.ActiveMatchLock", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("GameType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("MatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("MatchId");
+
+                    b.ToTable("ActiveMatchLocks", (string)null);
+                });
+
             modelBuilder.Entity("Cheslax.Domain.GameMatch", b =>
                 {
                     b.Property<Guid>("Id")
@@ -36,6 +64,11 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("GameType")
                         .HasColumnType("int");
+
+                    b.Property<int>("Mode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<int?>("Outcome")
                         .HasColumnType("int");
@@ -73,7 +106,9 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(450)");
 
                     b.Property<bool>("Rated")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<int?>("ResultReason")
                         .HasColumnType("int");
@@ -113,6 +148,10 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                     b.HasIndex("RoomId");
 
                     b.HasIndex("GameType", "FinishedAt");
+
+                    b.HasIndex("Status", "Rated", "Player1UserId");
+
+                    b.HasIndex("Status", "Rated", "Player2UserId");
 
                     b.ToTable("GameMatches", (string)null);
                 });
@@ -162,6 +201,11 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("LastActivityAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int>("Mode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.Property<int?>("Player1ClockMs")
                         .HasColumnType("int");
 
@@ -169,7 +213,9 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<bool>("Rated")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -195,6 +241,8 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Code")
                         .IsUnique();
+
+                    b.HasIndex("CurrentMatchId");
 
                     b.HasIndex("HostUserId");
 
@@ -283,6 +331,48 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("MatchMoves", (string)null);
+                });
+
+            modelBuilder.Entity("Cheslax.Domain.MatchmakingTicket", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset>("EnqueuedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("GameType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("MatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RatingAtEnqueue")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ResolvedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.HasIndex("GameType", "Status", "EnqueuedAt");
+
+                    b.ToTable("MatchmakingTickets", (string)null);
                 });
 
             modelBuilder.Entity("Cheslax.Domain.PlayerRating", b =>
@@ -386,9 +476,10 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("MatchId");
-
                     b.HasIndex("OpponentUserId");
+
+                    b.HasIndex("MatchId", "UserId")
+                        .IsUnique();
 
                     b.HasIndex("UserId", "CreatedAt");
 
@@ -521,6 +612,11 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsGuest")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTimeOffset?>("LastSeenAt")
                         .HasColumnType("datetimeoffset");
 
@@ -558,6 +654,8 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("IsGuest");
 
                     b.HasIndex("NormalizedEmail")
                         .HasDatabaseName("EmailIndex");
@@ -651,6 +749,15 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                     b.ToTable("UserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("Cheslax.Domain.ActiveMatchLock", b =>
+                {
+                    b.HasOne("Cheslax.Infrastructure.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Cheslax.Domain.GameMatch", b =>
                 {
                     b.HasOne("Cheslax.Infrastructure.Identity.User", null)
@@ -717,6 +824,15 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Match");
+                });
+
+            modelBuilder.Entity("Cheslax.Domain.MatchmakingTicket", b =>
+                {
+                    b.HasOne("Cheslax.Infrastructure.Identity.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Cheslax.Domain.PlayerRating", b =>

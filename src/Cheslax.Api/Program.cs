@@ -1,8 +1,11 @@
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Cheslax.Api.Hosting;
+using Cheslax.Api.Hubs;
 using Cheslax.Api.Middleware;
 using Cheslax.Api.Options;
 using Cheslax.Application;
+using Cheslax.Application.Play;
 using Cheslax.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -106,7 +109,12 @@ builder.Services.AddSignalR(options =>
     options.MaximumReceiveMessageSize = 32 * 1024;
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+}).AddJsonProtocol(options =>
+{
+    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
+builder.Services.AddScoped<IPlayNotifier, HubPlayNotifier>();
+builder.Services.AddHostedService<GameTickHostedService>();
 
 var app = builder.Build();
 
@@ -132,6 +140,7 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<GameHub>("/hubs/game");
 app.MapHealthChecks("/health");
 
 if (!EF.IsDesignTime)

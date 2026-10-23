@@ -8,4 +8,5 @@ public interface IAuthService
     Task<ProfileDto> GetCurrentAsync(string userId, CancellationToken cancellationToken);
     Task<ProfileDto> UpdateCurrentAsync(string userId, UpdateProfileRequest request, CancellationToken cancellationToken);
     Task<ProfileDto?> GetPublicAsync(string username, CancellationToken cancellationToken);
+    Task<UserDto> EnsureGuestAsync(GuestRequest request, string? currentUserId, CancellationToken cancellationToken);
 }

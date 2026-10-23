@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
+using Cheslax.Api.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Cheslax.IntegrationTests;
 
@@ -56,6 +58,13 @@ public sealed class CheslaxApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("ConnectionStrings:Default", $"Data Source={_dbPath}");
         builder.UseSetting("Cors:Origins:0", "http://localhost:5173");
         builder.UseEnvironment("Development");
+        builder.ConfigureServices(services =>
+        {
+            foreach (var descriptor in services.Where(item => item.ImplementationType == typeof(GameTickHostedService)).ToList())
+            {
+                services.Remove(descriptor);
+            }
+        });
     }
 
     protected override void Dispose(bool disposing)

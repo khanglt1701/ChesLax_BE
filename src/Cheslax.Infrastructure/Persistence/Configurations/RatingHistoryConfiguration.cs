@@ -19,7 +19,7 @@ public sealed class RatingHistoryConfiguration : IEntityTypeConfiguration<Rating
         builder.Property(entry => entry.GameType).HasConversion<int>();
         builder.Property(entry => entry.Result).HasConversion<int>();
         builder.HasIndex(entry => new { entry.UserId, entry.CreatedAt });
-        builder.HasIndex(entry => entry.MatchId);
+        builder.HasIndex(entry => new { entry.MatchId, entry.UserId }).IsUnique();
         builder.HasOne<User>()
             .WithMany()
             .HasForeignKey(entry => entry.UserId)

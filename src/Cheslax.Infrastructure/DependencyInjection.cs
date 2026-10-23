@@ -1,8 +1,11 @@
 using Cheslax.Application.Abstractions;
 using Cheslax.Application.Auth;
 using Cheslax.Application.Catalog;
+using Cheslax.Application.Play;
+using Cheslax.Domain;
 using Cheslax.Infrastructure.Catalog;
 using Cheslax.Infrastructure.Identity;
+using Cheslax.Infrastructure.Play;
 using Cheslax.Infrastructure.Options;
 using Cheslax.Infrastructure.Persistence;
 using Cheslax.Infrastructure.Time;
@@ -27,9 +30,13 @@ public static class DependencyInjection
 
         services.AddSingleton<IClock, SystemClock>();
         services.AddSingleton(database);
+        services.Configure<MatchmakingOptions>(configuration.GetSection(MatchmakingOptions.SectionName));
         services.AddScoped<IAuthService, IdentityAuthService>();
         services.AddScoped<ILeaderboardService, LeaderboardService>();
         services.AddScoped<IPreferenceService, PreferenceService>();
+        services.AddScoped<IPlayNotifier, NullPlayNotifier>();
+        services.AddScoped<IPlayService, PlayService>();
+        services.AddScoped<IMatchmakingService, MatchmakingService>();
 
         services.AddDbContext<CheslaxDbContext>(options =>
         {
@@ -85,12 +92,16 @@ public static class DependencyInjection
         await using var scope = host.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CheslaxDbContext>();
         var database = scope.ServiceProvider.GetRequiredService<DatabaseOptions>();
+        var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
         if (database.IsSqlite)
         {
             await db.Database.EnsureCreatedAsync(cancellationToken);
             return;
         }
 
-        await db.Database.MigrateAsync(cancellationToken);
+        if (environment.IsDevelopment())
+        {
+            await db.Database.MigrateAsync(cancellationToken);
+        }
     }
 }

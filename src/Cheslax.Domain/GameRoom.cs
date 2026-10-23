@@ -5,9 +5,10 @@ public sealed class GameRoom
     public Guid Id { get; set; }
     public string Code { get; set; } = string.Empty;
     public GameType GameType { get; set; }
+    public MatchMode Mode { get; set; } = MatchMode.Casual;
     public MatchStatus Status { get; set; } = MatchStatus.Waiting;
     public string TimeControlId { get; set; } = "off";
-    public bool Rated { get; set; } = true;
+    public bool Rated { get; set; }
     public string HostUserId { get; set; } = string.Empty;
     public Guid? CurrentMatchId { get; set; }
     public int Version { get; set; }

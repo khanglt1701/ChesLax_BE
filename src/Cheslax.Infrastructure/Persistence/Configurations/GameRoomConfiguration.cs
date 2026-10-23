@@ -17,11 +17,14 @@ public sealed class GameRoomConfiguration : IEntityTypeConfiguration<GameRoom>
         builder.Property(room => room.DrawOfferedByUserId).HasMaxLength(450);
         builder.Property(room => room.ClockRunningSide).HasMaxLength(8);
         builder.Property(room => room.GameType).HasConversion<int>();
+        builder.Property(room => room.Mode).HasConversion<int>().HasDefaultValue(MatchMode.Casual).HasSentinel((MatchMode)0);
         builder.Property(room => room.Status).HasConversion<int>();
+        builder.Property(room => room.Rated).HasDefaultValue(false);
         builder.Property(room => room.StateJson);
         builder.Property(room => room.RowVersion).IsRowVersion();
         builder.HasIndex(room => room.Code).IsUnique();
         builder.HasIndex(room => new { room.Status, room.LastActivityAt });
+        builder.HasIndex(room => room.CurrentMatchId);
         builder.HasOne<User>()
             .WithMany()
             .HasForeignKey(room => room.HostUserId)

@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Cheslax.Application\Cheslax.Application.csproj" />
     <ProjectReference Include="..\Cheslax.Domain\Cheslax.Domain.csproj" />
+    <ProjectReference Include="..\Cheslax.GameEngine\Cheslax.GameEngine.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -111,11 +111,65 @@ public sealed class IdentityAuthService(
     public async Task<ProfileDto?> GetPublicAsync(string username, CancellationToken cancellationToken)
     {
         var user = await users.FindByNameAsync(username.Trim());
-        return user is null ? null : await ToProfileAsync(user, cancellationToken);
+        return user is null || user.IsGuest ? null : await ToProfileAsync(user, cancellationToken);
+    }
+
+    public async Task<UserDto> EnsureGuestAsync(GuestRequest request, string? currentUserId, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrEmpty(currentUserId))
+        {
+            var current = await users.FindByIdAsync(currentUserId)
+                ?? throw new CheslaxException("NOT_FOUND", "Không tìm thấy tài khoản.", 404);
+            if (!current.IsGuest)
+            {
+                return ToUserDto(current);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.DisplayName))
+            {
+                current.DisplayName = request.DisplayName.Trim()[..Math.Min(40, request.DisplayName.Trim().Length)];
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.AvatarId) && AllowedAvatars.Contains(request.AvatarId))
+            {
+                current.AvatarId = request.AvatarId;
+            }
+
+            await users.UpdateAsync(current);
+            return ToUserDto(current);
+        }
+
+        var now = clock.UtcNow;
+        var suffix = Guid.NewGuid().ToString("N")[..12];
+        var displayName = string.IsNullOrWhiteSpace(request.DisplayName)
+            ? "Khách Cheslax"
+            : request.DisplayName.Trim();
+        if (displayName.Length > 40) displayName = displayName[..40];
+        var avatar = request.AvatarId is not null && AllowedAvatars.Contains(request.AvatarId)
+            ? request.AvatarId
+            : "seal-1";
+        var user = new User
+        {
+            UserName = $"guest_{suffix}",
+            Email = $"guest_{suffix}@guest.cheslax.local",
+            DisplayName = displayName,
+            AvatarId = avatar,
+            CreatedAt = now,
+            EmailConfirmed = true,
+            IsGuest = true,
+        };
+        var created = await users.CreateAsync(user);
+        if (!created.Succeeded)
+        {
+            throw new CheslaxException("REGISTER_FAILED", "Không tạo được phiên khách.", 400);
+        }
+
+        await signIn.SignInAsync(user, isPersistent: true);
+        return ToUserDto(user);
     }
 
     private static UserDto ToUserDto(User user) =>
-        new(user.UserName!, user.DisplayName, user.AvatarId, user.CreatedAt);
+        new(user.UserName!, user.DisplayName, user.AvatarId, user.CreatedAt, user.IsGuest);
 
     private async Task<ProfileDto> ToProfileAsync(User user, CancellationToken cancellationToken)
     {
@@ -136,7 +190,8 @@ public sealed class IdentityAuthService(
             user.AvatarId,
             user.CreatedAt,
             ratings.Select(ToRatingDto).ToList(),
-            history.Select(ToHistoryDto).ToList());
+            history.Select(ToHistoryDto).ToList(),
+            user.IsGuest);
     }
 
     private static GameRatingDto ToRatingDto(PlayerRating rating) => new(

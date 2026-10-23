@@ -5,8 +5,9 @@ public sealed class GameMatch
     public Guid Id { get; set; }
     public Guid RoomId { get; set; }
     public GameType GameType { get; set; }
+    public MatchMode Mode { get; set; } = MatchMode.Casual;
     public MatchStatus Status { get; set; } = MatchStatus.Waiting;
-    public bool Rated { get; set; } = true;
+    public bool Rated { get; set; }
     public string TimeControlId { get; set; } = "off";
     public string Player1UserId { get; set; } = string.Empty;
     public string Player2UserId { get; set; } = string.Empty;
