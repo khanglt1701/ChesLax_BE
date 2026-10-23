@@ -788,6 +788,10 @@ public sealed class PlayService(
 
         var youSeat = room.Seats.FirstOrDefault(seat => seat.UserId == userId);
         var opponentType = match?.OpponentType == OpponentType.Ai ? "ai" : "human";
+        var seatUserIds = room.Seats.Select(seat => seat.UserId).ToList();
+        var ratings = await db.PlayerRatings.AsNoTracking()
+            .Where(item => seatUserIds.Contains(item.UserId) && item.GameType == room.GameType)
+            .ToDictionaryAsync(item => item.UserId, cancellationToken);
         RoomResultDto? result = null;
         if (match is { Status: MatchStatus.Finished })
         {
@@ -814,16 +818,29 @@ public sealed class PlayService(
             room.Seats.Select(seat =>
             {
                 var isAi = SystemBotUser.IsBotId(seat.UserId) || users.GetValueOrDefault(seat.UserId)?.IsBot == true;
+                var persona = AiOpponentPersona.Resolve(match?.AiDifficulty);
                 var name = isAi
-                    ? (match?.AiDifficultyLabel is { Length: > 0 } label ? $"Máy — {label}" : SystemBotUser.DisplayName)
+                    ? persona.Name
                     : users.GetValueOrDefault(seat.UserId)?.DisplayName ?? "Kỳ thủ";
+                var avatarId = isAi
+                    ? persona.AvatarId
+                    : users.GetValueOrDefault(seat.UserId)?.AvatarId ?? "seal-1";
+                int? rating = null;
+                if (match is not null)
+                {
+                    if (seat.UserId == match.Player1UserId) rating = match.Player1RatingBefore;
+                    else if (seat.UserId == match.Player2UserId) rating = match.Player2RatingBefore;
+                }
+
+                rating ??= ratings.GetValueOrDefault(seat.UserId)?.Rating;
                 return new PublicSeatDto(
                     seat.UserId,
                     name,
-                    users.GetValueOrDefault(seat.UserId)?.AvatarId ?? "seal-1",
+                    avatarId,
                     isAi || seat.Connected,
                     ParseSide(room.GameType, seat.Side),
-                    isAi);
+                    isAi,
+                    rating);
             }).ToList(),
             room.Status == MatchStatus.Waiting,
             chess,
@@ -869,7 +886,7 @@ public sealed class PlayService(
             newRank.Level < oldRank.Level,
             newRank.Level == RankCatalog.Max.Level && newRank.Id != oldRank.Id,
             match.OpponentType == OpponentType.Ai
-                ? (match.AiDifficultyLabel is { Length: > 0 } label ? $"Máy — {label}" : SystemBotUser.DisplayName)
+                ? AiOpponentPersona.Resolve(match.AiDifficulty).Name
                 : "Đối thủ",
             isP1 ? match.Player2RatingBefore : match.Player1RatingBefore,
             match.OpponentType == OpponentType.Ai ? "ai" : "human",

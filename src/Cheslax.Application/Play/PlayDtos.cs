@@ -66,7 +66,8 @@ public sealed record PublicSeatDto(
     string AvatarId,
     bool Connected,
     object Side,
-    bool IsAi = false);
+    bool IsAi = false,
+    int? Rating = null);
 
 public sealed record ChessPublicDto(
     string Fen,

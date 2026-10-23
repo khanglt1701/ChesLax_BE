@@ -48,9 +48,7 @@ public sealed class RatingService(
             var humanBefore = humanIsP1 ? match.Player1RatingBefore : match.Player2RatingBefore;
             var aiRating = humanIsP1 ? match.Player2RatingBefore : match.Player1RatingBefore;
             var change = EloCalculator.Compute(humanBefore, aiRating, humanResult, _options.KFactor);
-            var opponentName = match.AiDifficultyLabel is { Length: > 0 } label
-                ? $"Máy — {label}"
-                : SystemBotUser.DisplayName;
+            var opponentName = AiOpponentPersona.Resolve(match.AiDifficulty).Name;
             await ApplyOne(match, humanId, SystemBotUser.UserId, opponentName, change, humanResult, cancellationToken);
             if (humanIsP1)
             {

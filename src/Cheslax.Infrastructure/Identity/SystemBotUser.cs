@@ -1,3 +1,4 @@
+using Cheslax.Domain;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,7 @@ public static class SystemBotUser
     public const string UserId = "cheslax-ai-opponent";
     public const string UserName = "cheslax_ai";
     public const string Email = "ai@cheslax.local";
-    public const string DisplayName = "Máy Cheslax";
+    public const string DisplayName = AiOpponentPersona.DefaultName;
 
     public static bool IsBotId(string? userId) =>
         string.Equals(userId, UserId, StringComparison.Ordinal);
@@ -18,10 +19,23 @@ public static class SystemBotUser
         var existing = await users.Users.FirstOrDefaultAsync(user => user.Id == UserId, cancellationToken);
         if (existing is not null)
         {
+            var dirty = false;
             if (!existing.IsBot)
             {
                 existing.IsBot = true;
                 existing.IsGuest = true;
+                dirty = true;
+            }
+
+            if (existing.DisplayName.Contains("Máy", StringComparison.Ordinal) ||
+                string.Equals(existing.DisplayName, "Máy Cheslax", StringComparison.Ordinal))
+            {
+                existing.DisplayName = DisplayName;
+                dirty = true;
+            }
+
+            if (dirty)
+            {
                 await users.UpdateAsync(existing);
             }
 
