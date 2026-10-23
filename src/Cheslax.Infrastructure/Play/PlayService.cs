@@ -7,6 +7,7 @@ using Cheslax.GameEngine.Chess;
 using Cheslax.GameEngine.OAnQuan;
 using Cheslax.Infrastructure.Identity;
 using Cheslax.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +17,9 @@ public sealed class PlayService(
     CheslaxDbContext db,
     IClock clock,
     IPlayNotifier notifier,
+    IAIOpponentService ai,
+    IRatingService ratings,
+    UserManager<User> users,
     IOptions<MatchmakingOptions> options) : IPlayService
 {
     private static readonly char[] RoomAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".ToCharArray();
@@ -126,6 +130,13 @@ public sealed class PlayService(
             .ToListAsync(cancellationToken);
         foreach (var seat in seats)
         {
+            if (SystemBotUser.IsBotId(seat.UserId))
+            {
+                seat.Connected = true;
+                seat.LastDisconnectedAt = null;
+                continue;
+            }
+
             seat.Connected = connected;
             seat.LastDisconnectedAt = connected ? null : clock.UtcNow;
             if (seat.Room is null) continue;
@@ -198,6 +209,10 @@ public sealed class PlayService(
             FinishFromChess(room, match, applied.Position);
             await FinalizeRatings(room, match, cancellationToken);
         }
+        else
+        {
+            await ApplyAiTurnIfNeeded(room, match, cancellationToken);
+        }
 
         await db.SaveChangesAsync(cancellationToken);
         await notifier.RoomUpdatedAsync(room.Code, SeatIds(room), cancellationToken);
@@ -250,6 +265,10 @@ public sealed class PlayService(
             {
                 FinishFromOAnQuan(room, match, applied.State);
                 await FinalizeRatings(room, match, cancellationToken);
+            }
+            else
+            {
+                await ApplyAiTurnIfNeeded(room, match, cancellationToken);
             }
         }
         catch (InvalidOperationException ex)
@@ -352,7 +371,60 @@ public sealed class PlayService(
         return await ToPublic(room.Code, player1.Id, cancellationToken);
     }
 
-    private async Task<GameMatch> StartMatch(GameRoom room, CancellationToken cancellationToken, int? rating1 = null, int? rating2 = null)
+    public async Task<RoomPublicDto> CreateRankedAiMatchAsync(string userId, string gameId, int playerRating, CancellationToken cancellationToken)
+    {
+        var player = await RequireUser(userId, cancellationToken);
+        if (player.IsGuest || player.IsBot)
+        {
+            throw new CheslaxException("LOGIN_REQUIRED", "Chế độ xếp hạng cần tài khoản đã đăng nhập.", 401);
+        }
+
+        await EnsureNotBusy(userId, cancellationToken);
+        var bot = await SystemBotUser.EnsureAsync(users, cancellationToken);
+        var game = GameTypeIds.Parse(gameId);
+        var plan = ai.Plan(game, playerRating);
+        var now = clock.UtcNow;
+        var timeControl = TimeControl.Off;
+        var room = new GameRoom
+        {
+            Id = Guid.NewGuid(),
+            Code = await UniqueCode(cancellationToken),
+            GameType = game,
+            Mode = MatchMode.Ranked,
+            Status = MatchStatus.Waiting,
+            TimeControlId = timeControl.Id,
+            Rated = true,
+            HostUserId = player.Id,
+            CreatedAt = now,
+            LastActivityAt = now,
+            StateJson = PlayJson.Serialize(CreateInitialState(game, timeControl, now)),
+        };
+        var hostSide = game == GameType.OAnQuan
+            ? (RandomNumberGenerator.GetInt32(0, 2) == 0 ? "0" : "1")
+            : PickHostSide(game, "random");
+        room.Seats.Add(MakeSeat(room.Id, player.Id, 1, hostSide, now));
+        var botSeat = MakeSeat(room.Id, bot.Id, 2, OtherSide(game, hostSide), now);
+        botSeat.Connected = true;
+        room.Seats.Add(botSeat);
+        db.GameRooms.Add(room);
+        var match = await StartMatch(room, cancellationToken, playerRating, plan.OpponentRating, configure =>
+        {
+            configure.OpponentType = OpponentType.Ai;
+            configure.AiDifficulty = plan.DifficultyId;
+            configure.AiDifficultyLabel = plan.DifficultyLabel;
+            configure.AiRatingPolicy = plan.RatingPolicy;
+        });
+        await ApplyAiTurnIfNeeded(room, match, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return await ToPublic(room.Code, player.Id, cancellationToken);
+    }
+
+    private async Task<GameMatch> StartMatch(
+        GameRoom room,
+        CancellationToken cancellationToken,
+        int? rating1 = null,
+        int? rating2 = null,
+        Action<GameMatch>? configure = null)
     {
         var ordered = room.Seats.OrderBy(seat => seat.SeatNumber).ToList();
         var p1 = ordered[0];
@@ -378,14 +450,29 @@ public sealed class PlayService(
             CreatedAt = now,
             StartedAt = now,
         };
+        configure?.Invoke(match);
         db.GameMatches.Add(match);
         room.Matches.Add(match);
         db.Entry(match).State = EntityState.Added;
         room.Status = MatchStatus.Playing;
         room.LastActivityAt = now;
-        db.ActiveMatchLocks.AddRange(
-            new ActiveMatchLock { UserId = p1.UserId, MatchId = match.Id, RoomId = room.Id, GameType = room.GameType, Mode = room.Mode, CreatedAt = now },
-            new ActiveMatchLock { UserId = p2.UserId, MatchId = match.Id, RoomId = room.Id, GameType = room.GameType, Mode = room.Mode, CreatedAt = now });
+        foreach (var seat in new[] { p1, p2 })
+        {
+            if (SystemBotUser.IsBotId(seat.UserId))
+            {
+                continue;
+            }
+
+            db.ActiveMatchLocks.Add(new ActiveMatchLock
+            {
+                UserId = seat.UserId,
+                MatchId = match.Id,
+                RoomId = room.Id,
+                GameType = room.GameType,
+                Mode = room.Mode,
+                CreatedAt = now,
+            });
+        }
         var state = PlayJson.Parse(room.StateJson);
         if (state.WhiteMs > 0 || state.BlackMs > 0)
         {
@@ -447,7 +534,7 @@ public sealed class PlayService(
 
     private async Task FinalizeRatings(GameRoom room, GameMatch match, CancellationToken cancellationToken)
     {
-        await ApplyRatingsIfNeeded(room, match, cancellationToken);
+        await ratings.ApplyIfNeededAsync(match, cancellationToken);
         var locks = db.ActiveMatchLocks.Local.Where(item => item.MatchId == match.Id).ToList();
         if (locks.Count == 0)
         {
@@ -481,90 +568,158 @@ public sealed class PlayService(
         }
     }
 
-    private async Task ApplyRatingsIfNeeded(GameRoom room, GameMatch match, CancellationToken cancellationToken)
+    private async Task ApplyAiTurnIfNeeded(GameRoom room, GameMatch match, CancellationToken cancellationToken)
     {
-        if (!match.Rated || match.Outcome is null)
+        if (match.OpponentType != OpponentType.Ai || match.Status != MatchStatus.Playing)
         {
             return;
         }
 
-        var already = await db.RatingHistories.AnyAsync(entry => entry.MatchId == match.Id, cancellationToken);
-        if (already)
+        var botSeat = room.Seats.FirstOrDefault(seat => SystemBotUser.IsBotId(seat.UserId));
+        if (botSeat is null)
         {
             return;
         }
 
-        var p1Result = match.Outcome switch
+        var plan = PlanForMatch(match);
+        if (room.GameType == GameType.Chess)
         {
-            MatchOutcome.Player1Win => MatchResultKind.Win,
-            MatchOutcome.Player2Win => MatchResultKind.Loss,
-            _ => MatchResultKind.Draw,
-        };
-        var (change1, change2) = EloCalculator.ComputePair(
-            match.Player1RatingBefore,
-            match.Player2RatingBefore,
-            p1Result,
-            _options.KFactor);
-        var users = await db.Users.AsNoTracking()
-            .Where(user => user.Id == match.Player1UserId || user.Id == match.Player2UserId)
-            .ToDictionaryAsync(user => user.Id, cancellationToken);
-        await ApplyOneRating(match, match.Player1UserId, match.Player2UserId, users.GetValueOrDefault(match.Player2UserId)?.DisplayName ?? "Đối thủ", change1, p1Result, cancellationToken);
-        await ApplyOneRating(
-            match,
-            match.Player2UserId,
-            match.Player1UserId,
-            users.GetValueOrDefault(match.Player1UserId)?.DisplayName ?? "Đối thủ",
-            change2,
-            p1Result == MatchResultKind.Win ? MatchResultKind.Loss : p1Result == MatchResultKind.Loss ? MatchResultKind.Win : MatchResultKind.Draw,
-            cancellationToken);
-        match.Player1RatingAfter = change1.NewRating;
-        match.Player2RatingAfter = change2.NewRating;
+            ApplyChessAiMove(room, match, botSeat, plan, cancellationToken);
+            return;
+        }
+
+        ApplyOAnQuanAiMove(room, match, botSeat, plan, cancellationToken);
+        if (match.Status is MatchStatus.Finished or MatchStatus.Abandoned)
+        {
+            await FinalizeRatings(room, match, cancellationToken);
+        }
     }
 
-    private async Task ApplyOneRating(
-        GameMatch match,
-        string userId,
-        string opponentId,
-        string opponentName,
-        EloChange change,
-        MatchResultKind result,
-        CancellationToken cancellationToken)
+    private RankedAiPlan PlanForMatch(GameMatch match)
     {
-        var rating = await db.PlayerRatings.FirstOrDefaultAsync(
-            item => item.UserId == userId && item.GameType == match.GameType,
-            cancellationToken);
-        if (rating is null)
+        var planned = ai.Plan(match.GameType, match.Player1RatingBefore);
+        if (string.IsNullOrWhiteSpace(match.AiDifficulty) || match.AiDifficulty == planned.DifficultyId)
         {
-            rating = PlayerRating.CreateInitial(userId, match.GameType, clock.UtcNow);
-            db.PlayerRatings.Add(rating);
+            return planned with
+            {
+                DifficultyLabel = match.AiDifficultyLabel ?? planned.DifficultyLabel,
+                OpponentRating = match.Player2RatingBefore,
+                RatingPolicy = match.AiRatingPolicy ?? planned.RatingPolicy,
+            };
         }
 
-        rating.Rating = change.NewRating;
-        rating.PeakRating = Math.Max(rating.PeakRating, change.NewRating);
-        rating.GamesPlayed += 1;
-        rating.Wins += result == MatchResultKind.Win ? 1 : 0;
-        rating.Losses += result == MatchResultKind.Loss ? 1 : 0;
-        rating.Draws += result == MatchResultKind.Draw ? 1 : 0;
-        rating.UpdatedAt = clock.UtcNow;
-        var oldRank = RankCatalog.GetByRating(change.OldRating);
-        var newRank = RankCatalog.GetByRating(change.NewRating);
-        db.RatingHistories.Add(new RatingHistory
+        var band = _options.DifficultiesFor(match.GameType).FirstOrDefault(item => item.Id == match.AiDifficulty);
+        return band is null
+            ? planned
+            : new RankedAiPlan(
+                band.Id,
+                match.AiDifficultyLabel ?? band.Label,
+                match.Player2RatingBefore,
+                match.AiRatingPolicy ?? planned.RatingPolicy,
+                band.SearchDepth,
+                band.Noise,
+                band.BlunderChance,
+                band.MaxNodes,
+                band.MaxTimeMs,
+                band.Quiesce);
+    }
+
+    private void ApplyChessAiMove(GameRoom room, GameMatch match, GameRoomSeat botSeat, RankedAiPlan plan, CancellationToken cancellationToken)
+    {
+        var state = PlayJson.Parse(room.StateJson);
+        var position = new ChessPosition(state.ChessFen ?? ChessPosition.StartingFen);
+        if (botSeat.Side.Length == 0 || botSeat.Side[0] != position.Turn || position.IsGameOver)
+        {
+            return;
+        }
+
+        ChessLegalMove chosen;
+        try
+        {
+            chosen = ai.ChooseChessMove(position, plan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            var emergency = position.LegalMoves().FirstOrDefault();
+            if (string.IsNullOrEmpty(emergency.From)) return;
+            chosen = emergency;
+        }
+
+        if (!position.TryMove(chosen.From, chosen.To, chosen.Promotion, out var applied) || applied is null)
+        {
+            var fallback = position.LegalMoves().FirstOrDefault();
+            if (string.IsNullOrEmpty(fallback.From) || !position.TryMove(fallback.From, fallback.To, fallback.Promotion, out applied) || applied is null)
+            {
+                return;
+            }
+        }
+
+        state.ChessFen = applied.Position.Fen;
+        state.ChessHistory = applied.Position.History;
+        state.LastFrom = applied.From;
+        state.LastTo = applied.To;
+        ApplyClockIncrement(state, botSeat.Side);
+        state.ClockRunning = applied.Position.Turn.ToString();
+        state.ClockUpdatedAt = clock.UtcNow;
+        room.StateJson = PlayJson.Serialize(state);
+        room.Version += 1;
+        room.LastActivityAt = clock.UtcNow;
+        db.MatchMoves.Add(new MatchMove
         {
             Id = Guid.NewGuid(),
-            UserId = userId,
             MatchId = match.Id,
-            GameType = match.GameType,
-            Result = result,
-            OldRating = change.OldRating,
-            NewRating = change.NewRating,
-            Delta = change.Delta,
-            OldRankId = oldRank.Id,
-            NewRankId = newRank.Id,
-            OpponentUserId = opponentId,
-            OpponentName = opponentName,
-            OpponentRating = userId == match.Player1UserId ? match.Player2RatingBefore : match.Player1RatingBefore,
-            CreatedAt = clock.UtcNow,
+            Sequence = match.Moves.Count + 1,
+            PlayerUserId = botSeat.UserId,
+            Payload = $"{applied.From}{applied.To}{applied.Promotion}",
+            ClockMsRemaining = botSeat.Side == "w" ? state.WhiteMs : state.BlackMs,
+            PlayedAt = clock.UtcNow,
         });
+        if (applied.Position.IsGameOver)
+        {
+            FinishFromChess(room, match, applied.Position);
+        }
+    }
+
+    private void ApplyOAnQuanAiMove(GameRoom room, GameMatch match, GameRoomSeat botSeat, RankedAiPlan plan, CancellationToken cancellationToken)
+    {
+        if (!int.TryParse(botSeat.Side, out var playerId))
+        {
+            return;
+        }
+
+        var state = PlayJson.Parse(room.StateJson);
+        var board = state.OAnQuan ?? OAnQuanRules.CreateInitialState();
+        if (board.Status != "playing" || board.CurrentPlayer != playerId)
+        {
+            return;
+        }
+
+        var chosen = ai.ChooseOAnQuanMove(board, plan, cancellationToken);
+        var direction = chosen.Direction is "cw" or "clockwise"
+            ? OAnQuanDirection.Clockwise
+            : OAnQuanDirection.CounterClockwise;
+        var applied = OAnQuanRules.ApplyMoveForPlayer(board, chosen.Pit, direction, playerId);
+        state.OAnQuan = applied.State;
+        state.OAnQuanHistory.Add(applied.Description);
+        state.LastPit = chosen.Pit;
+        state.LastDirection = chosen.Direction;
+        state.LastEvents = OAnQuanPublicMapper.ToPublicEvents(applied.Events);
+        room.StateJson = PlayJson.Serialize(state);
+        room.Version += 1;
+        room.LastActivityAt = clock.UtcNow;
+        db.MatchMoves.Add(new MatchMove
+        {
+            Id = Guid.NewGuid(),
+            MatchId = match.Id,
+            Sequence = match.Moves.Count + 1,
+            PlayerUserId = botSeat.UserId,
+            Payload = $"{chosen.Pit}:{chosen.Direction}",
+            PlayedAt = clock.UtcNow,
+        });
+        if (applied.State.Status == "ended")
+        {
+            FinishFromOAnQuan(room, match, applied.State);
+        }
     }
 
     private bool SyncClocks(GameRoom room, GameMatch match)
@@ -632,6 +787,7 @@ public sealed class PlayService(
         }
 
         var youSeat = room.Seats.FirstOrDefault(seat => seat.UserId == userId);
+        var opponentType = match?.OpponentType == OpponentType.Ai ? "ai" : "human";
         RoomResultDto? result = null;
         if (match is { Status: MatchStatus.Finished })
         {
@@ -640,7 +796,10 @@ public sealed class PlayService(
                 match.StateSnapshot ?? "Ván đã kết thúc",
                 WinnerSide(match),
                 match.Rated,
-                change);
+                change,
+                opponentType,
+                match.AiDifficulty,
+                match.AiDifficultyLabel);
         }
 
         return new RoomPublicDto(
@@ -652,19 +811,34 @@ public sealed class PlayService(
             room.Version,
             room.TimeControlId,
             youSeat is null ? null : new { playerId = youSeat.UserId, side = ParseSide(room.GameType, youSeat.Side) },
-            room.Seats.Select(seat => new PublicSeatDto(
-                seat.UserId,
-                users.GetValueOrDefault(seat.UserId)?.DisplayName ?? "Kỳ thủ",
-                users.GetValueOrDefault(seat.UserId)?.AvatarId ?? "seal-1",
-                seat.Connected,
-                ParseSide(room.GameType, seat.Side))).ToList(),
+            room.Seats.Select(seat =>
+            {
+                var isAi = SystemBotUser.IsBotId(seat.UserId) || users.GetValueOrDefault(seat.UserId)?.IsBot == true;
+                var name = isAi
+                    ? (match?.AiDifficultyLabel is { Length: > 0 } label ? $"Máy — {label}" : SystemBotUser.DisplayName)
+                    : users.GetValueOrDefault(seat.UserId)?.DisplayName ?? "Kỳ thủ";
+                return new PublicSeatDto(
+                    seat.UserId,
+                    name,
+                    users.GetValueOrDefault(seat.UserId)?.AvatarId ?? "seal-1",
+                    isAi || seat.Connected,
+                    ParseSide(room.GameType, seat.Side),
+                    isAi);
+            }).ToList(),
             room.Status == MatchStatus.Waiting,
             chess,
             oaq,
             result,
             room.DisconnectDeadline,
             room.CreatedAt,
-            match?.Id);
+            match?.Id,
+            opponentType,
+            match?.AiDifficulty,
+            match?.AiDifficultyLabel,
+            match?.AiRatingPolicy,
+            match?.OpponentType == OpponentType.Ai
+                ? (SystemBotUser.IsBotId(match.Player2UserId) ? match.Player2RatingBefore : match.Player1RatingBefore)
+                : null);
     }
 
     private static RatingChangeDto? ChangeFor(GameMatch match, string userId)
@@ -694,8 +868,13 @@ public sealed class PlayService(
             newRank.Level > oldRank.Level,
             newRank.Level < oldRank.Level,
             newRank.Level == RankCatalog.Max.Level && newRank.Id != oldRank.Id,
-            isP1 ? "Đối thủ" : "Đối thủ",
-            isP1 ? match.Player2RatingBefore : match.Player1RatingBefore);
+            match.OpponentType == OpponentType.Ai
+                ? (match.AiDifficultyLabel is { Length: > 0 } label ? $"Máy — {label}" : SystemBotUser.DisplayName)
+                : "Đối thủ",
+            isP1 ? match.Player2RatingBefore : match.Player1RatingBefore,
+            match.OpponentType == OpponentType.Ai ? "ai" : "human",
+            match.AiDifficulty,
+            match.AiDifficultyLabel);
     }
 
     private async Task<GameRoom> LoadRoom(string code, CancellationToken cancellationToken)
@@ -840,5 +1019,6 @@ public sealed class PlayService(
 
     private static IReadOnlyList<string> SeatIds(GameRoom room) => room.Seats.Select(seat => seat.UserId).ToList();
 
-    private static bool AllConnected(GameRoom room) => room.Seats.Count == 2 && room.Seats.All(seat => seat.Connected);
+    private static bool AllConnected(GameRoom room) =>
+        room.Seats.Count == 2 && room.Seats.All(seat => seat.Connected || SystemBotUser.IsBotId(seat.UserId));
 }

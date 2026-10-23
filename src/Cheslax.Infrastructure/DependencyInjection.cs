@@ -35,6 +35,9 @@ public static class DependencyInjection
         services.AddScoped<ILeaderboardService, LeaderboardService>();
         services.AddScoped<IPreferenceService, PreferenceService>();
         services.AddScoped<IPlayNotifier, NullPlayNotifier>();
+        services.AddScoped<IAIOpponentService, AiOpponentService>();
+        services.AddScoped<IHumanMatchmakingService, HumanMatchmakingService>();
+        services.AddScoped<IRatingService, RatingService>();
         services.AddScoped<IPlayService, PlayService>();
         services.AddScoped<IMatchmakingService, MatchmakingService>();
 
@@ -96,12 +99,13 @@ public static class DependencyInjection
         if (database.IsSqlite)
         {
             await db.Database.EnsureCreatedAsync(cancellationToken);
-            return;
         }
-
-        if (environment.IsDevelopment())
+        else if (environment.IsDevelopment())
         {
             await db.Database.MigrateAsync(cancellationToken);
         }
+
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+        await SystemBotUser.EnsureAsync(users, cancellationToken);
     }
 }

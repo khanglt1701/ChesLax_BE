@@ -20,8 +20,13 @@ public sealed class GameMatchConfiguration : IEntityTypeConfiguration<GameMatch>
         builder.Property(match => match.Mode).HasConversion<int>().HasDefaultValue(MatchMode.Casual).HasSentinel((MatchMode)0);
         builder.Property(match => match.Status).HasConversion<int>();
         builder.Property(match => match.Rated).HasDefaultValue(false);
+        builder.Property(match => match.OpponentType).HasConversion<int>().HasDefaultValue(OpponentType.Human).HasSentinel((OpponentType)0);
+        builder.Property(match => match.AiDifficulty).HasMaxLength(32);
+        builder.Property(match => match.AiDifficultyLabel).HasMaxLength(40);
+        builder.Property(match => match.AiRatingPolicy).HasMaxLength(64);
         builder.HasIndex(match => new { match.Status, match.Rated, match.Player1UserId });
         builder.HasIndex(match => new { match.Status, match.Rated, match.Player2UserId });
+        builder.HasIndex(match => new { match.OpponentType, match.Mode, match.Status });
         builder.Property(match => match.Outcome).HasConversion<int>();
         builder.Property(match => match.ResultReason).HasConversion<int>();
         builder.Property(match => match.RowVersion).IsRowVersion();

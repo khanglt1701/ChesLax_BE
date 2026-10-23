@@ -36,4 +36,19 @@ public class EloCalculatorTests
         var change = EloCalculator.Compute(5, 5, MatchResultKind.Loss);
         Assert.Equal(0, change.NewRating);
     }
+
+    [Fact]
+    public void Fixed_ai_opponent_rating_is_deterministic_and_uses_k32()
+    {
+        var loss = EloCalculator.Compute(1000, 1100, MatchResultKind.Loss);
+        var draw = EloCalculator.Compute(1000, 1100, MatchResultKind.Draw);
+        var win = EloCalculator.Compute(1000, 1100, MatchResultKind.Win);
+        Assert.Equal(loss.Delta, EloCalculator.Compute(1000, 1100, MatchResultKind.Loss).Delta);
+        Assert.Equal(-12, loss.Delta);
+        Assert.Equal(988, loss.NewRating);
+        Assert.Equal(4, draw.Delta);
+        Assert.Equal(20, win.Delta);
+        Assert.True(win.Delta > draw.Delta);
+        Assert.True(draw.Delta > loss.Delta);
+    }
 }

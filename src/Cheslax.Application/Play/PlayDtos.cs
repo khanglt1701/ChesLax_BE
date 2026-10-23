@@ -21,9 +21,18 @@ public sealed record QueueStatusDto(
     int WaitedSeconds,
     int AllowedSpread,
     DateTimeOffset EnqueuedAt,
-    MatchFoundDto? Match = null);
+    MatchFoundDto? Match = null,
+    string MatchmakingMode = RankedMatchmakingModes.AIOnly,
+    string? OpponentType = null);
 
-public sealed record MatchFoundDto(Guid MatchId, string RoomCode, string GameId, string Mode);
+public sealed record MatchFoundDto(
+    Guid MatchId,
+    string RoomCode,
+    string GameId,
+    string Mode,
+    string OpponentType = "human",
+    string? AiDifficulty = null,
+    string? AiDifficultyLabel = null);
 
 public sealed record RatingChangeDto(
     string GameId,
@@ -37,20 +46,27 @@ public sealed record RatingChangeDto(
     bool Demoted,
     bool ReachedMaxRank,
     string OpponentName,
-    int OpponentRating);
+    int OpponentRating,
+    string OpponentType = "human",
+    string? AiDifficulty = null,
+    string? AiDifficultyLabel = null);
 
 public sealed record RoomResultDto(
     string Reason,
     string? WinnerSide,
     bool Rated,
-    RatingChangeDto? YourChange);
+    RatingChangeDto? YourChange,
+    string OpponentType = "human",
+    string? AiDifficulty = null,
+    string? AiDifficultyLabel = null);
 
 public sealed record PublicSeatDto(
     [property: JsonPropertyName("playerId")] string UserId,
     string Name,
     string AvatarId,
     bool Connected,
-    object Side);
+    object Side,
+    bool IsAi = false);
 
 public sealed record ChessPublicDto(
     string Fen,
@@ -84,7 +100,12 @@ public sealed record RoomPublicDto(
     RoomResultDto? Result,
     DateTimeOffset? DisconnectDeadline,
     DateTimeOffset CreatedAt,
-    Guid? MatchId);
+    Guid? MatchId,
+    string OpponentType = "human",
+    string? AiDifficulty = null,
+    string? AiDifficultyLabel = null,
+    string? AiRatingPolicy = null,
+    int? OpponentRating = null);
 
 public interface IPlayNotifier
 {
@@ -105,6 +126,7 @@ public interface IPlayService
     Task<RoomPublicDto> ResignAsync(string userId, string code, CancellationToken cancellationToken);
     Task TickAsync(CancellationToken cancellationToken);
     Task<RoomPublicDto> CreateRankedMatchAsync(string player1Id, string player2Id, string gameId, int rating1, int rating2, CancellationToken cancellationToken);
+    Task<RoomPublicDto> CreateRankedAiMatchAsync(string userId, string gameId, int playerRating, CancellationToken cancellationToken);
 }
 
 public interface IMatchmakingService

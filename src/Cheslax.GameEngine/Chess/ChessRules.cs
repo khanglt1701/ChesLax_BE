@@ -2,6 +2,8 @@ namespace Cheslax.GameEngine.Chess;
 
 public sealed record ChessMoveResult(ChessPosition Position, string San, string From, string To, char? Promotion);
 
+public readonly record struct ChessLegalMove(string From, string To, char? Promotion);
+
 public sealed class ChessPosition
 {
     public const string StartingFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -122,6 +124,30 @@ public sealed class ChessPosition
         result = new ChessMoveResult(next, legal.San, SquareName(legal.From), SquareName(legal.To), legal.Promotion);
         return true;
     }
+
+    public IReadOnlyList<ChessLegalMove> LegalMoves() =>
+        GenerateLegalMoves()
+            .Select(move => new ChessLegalMove(SquareName(move.From), SquareName(move.To), move.Promotion))
+            .ToList();
+
+    internal int MaterialOn(int index)
+    {
+        var piece = Squares[index];
+        if (piece == '\0') return 0;
+        var value = char.ToLowerInvariant(piece) switch
+        {
+            'p' => 100,
+            'n' => 320,
+            'b' => 330,
+            'r' => 500,
+            'q' => 900,
+            'k' => 20_000,
+            _ => 0,
+        };
+        return char.IsUpper(piece) ? value : -value;
+    }
+
+    internal char PieceAt(int index) => Squares[index];
 
     private void ApplyInternal(GenMove move)
     {

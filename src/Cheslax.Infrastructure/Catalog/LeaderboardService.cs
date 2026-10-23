@@ -25,7 +25,7 @@ public sealed class LeaderboardService(CheslaxDbContext db) : ILeaderboardServic
         var query =
             from rating in db.PlayerRatings.AsNoTracking()
             join user in db.Users.AsNoTracking() on rating.UserId equals user.Id
-            where rating.GameType == gameType && !user.IsGuest
+            where rating.GameType == gameType && !user.IsGuest && !user.IsBot
             orderby rating.Rating descending, rating.GamesPlayed descending, user.NormalizedUserName
             select new
             {

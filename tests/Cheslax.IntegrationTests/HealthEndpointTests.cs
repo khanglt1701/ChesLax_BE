@@ -48,7 +48,7 @@ public class HealthEndpointTests : IClassFixture<CheslaxApiFactory>
         int StartingRating);
 }
 
-public sealed class CheslaxApiFactory : WebApplicationFactory<Program>
+public class CheslaxApiFactory : WebApplicationFactory<Program>
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"cheslax-it-{Guid.NewGuid():N}.db");
 

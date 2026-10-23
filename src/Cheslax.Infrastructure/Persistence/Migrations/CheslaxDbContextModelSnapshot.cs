@@ -56,6 +56,18 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AiDifficulty")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("AiDifficultyLabel")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("AiRatingPolicy")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -66,6 +78,11 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<int>("Mode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<int>("OpponentType")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(1);
@@ -148,6 +165,8 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                     b.HasIndex("RoomId");
 
                     b.HasIndex("GameType", "FinishedAt");
+
+                    b.HasIndex("OpponentType", "Mode", "Status");
 
                     b.HasIndex("Status", "Rated", "Player1UserId");
 
@@ -612,6 +631,11 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsBot")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("IsGuest")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -654,6 +678,8 @@ namespace Cheslax.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("IsBot");
 
                     b.HasIndex("IsGuest");
 

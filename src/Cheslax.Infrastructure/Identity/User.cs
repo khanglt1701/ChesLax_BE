@@ -9,4 +9,5 @@ public sealed class User : IdentityUser
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? LastSeenAt { get; set; }
     public bool IsGuest { get; set; }
+    public bool IsBot { get; set; }
 }

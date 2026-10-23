@@ -17,6 +17,10 @@ public sealed class GameMatch
     public int Player2RatingBefore { get; set; }
     public int? Player1RatingAfter { get; set; }
     public int? Player2RatingAfter { get; set; }
+    public OpponentType OpponentType { get; set; } = OpponentType.Human;
+    public string? AiDifficulty { get; set; }
+    public string? AiDifficultyLabel { get; set; }
+    public string? AiRatingPolicy { get; set; }
     public MatchOutcome? Outcome { get; set; }
     public ResultReason? ResultReason { get; set; }
     public string? StateSnapshot { get; set; }
