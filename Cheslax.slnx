@@ -6,8 +6,4 @@
     <Project Path="src/Cheslax.GameEngine/Cheslax.GameEngine.csproj" />
     <Project Path="src/Cheslax.Infrastructure/Cheslax.Infrastructure.csproj" />
   </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/Cheslax.IntegrationTests/Cheslax.IntegrationTests.csproj" />
-    <Project Path="tests/Cheslax.UnitTests/Cheslax.UnitTests.csproj" />
-  </Folder>
 </Solution>
