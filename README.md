@@ -47,8 +47,6 @@ Frontend build-time `VITE_*` variables are **not** used here and must not contai
 
 ## Migrations
 
-SQL Server migrations are archived in `archive/sqlserver-migrations/` and are not applied.
-
 PostgreSQL baseline: `src/Cheslax.Infrastructure/Persistence/Migrations/20261023105814_InitialPostgres.cs`.
 
 ```bash
